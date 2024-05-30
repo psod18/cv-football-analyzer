@@ -1,4 +1,3 @@
-from typing import List
 import numpy as np
 from sklearn.cluster import KMeans
 import cv2
@@ -34,10 +33,14 @@ class KitColorAnalyzer:
         labels = pred.labels_
         res = labels.reshape(cropped.shape[0], cropped.shape[1])
 
-        # get corner pixels - most of them must corresponds to background
-        # corners not work well - mb whole border
-        corners = [res[0,0], res[0, -1], res[-1, 0], res[-1, -1]]
-        bkg_cluster = max(corners, key=corners.count)
+        # bbox border pixels - most of them must corresponds to background
+        border = np.concatenate((
+            res[:,0],
+            res[:, -1],
+            res[-1, 1:-1],
+            res[0, 1:-1]
+        ))
+        bkg_cluster = np.argmax(np.bincount(border))
         player_claster = 1 - bkg_cluster
         player_color = pred.cluster_centers_[player_claster]
         return player_color
