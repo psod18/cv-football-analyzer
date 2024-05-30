@@ -22,6 +22,7 @@ class KitColorAnalyzer:
 
         self.kit_colors = self.kmeans.cluster_centers_
         print("Kit colors map has been updated")
+        print(self.kit_colors)
 
     def get_player_color(self, cropped):
         # convert colors and reshape
@@ -34,6 +35,7 @@ class KitColorAnalyzer:
         res = labels.reshape(cropped.shape[0], cropped.shape[1])
 
         # get corner pixels - most of them must corresponds to background
+        # corners not work well - mb whole border
         corners = [res[0,0], res[0, -1], res[-1, 0], res[-1, -1]]
         bkg_cluster = max(corners, key=corners.count)
         player_claster = 1 - bkg_cluster

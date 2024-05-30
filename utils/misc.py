@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -9,6 +10,4 @@ class Pawn:
     class_id: int
     label: str
     bbox: np.array
-    team_id: int
-
-
+    team_id: Optional[int] = None

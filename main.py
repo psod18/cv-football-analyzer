@@ -28,7 +28,7 @@ class CoachAssistant:
 
         self.raw_frames = []  
         self.output_frames = []
-        self.detections = []
+
 
         self.FPS = None
         self.W = None
@@ -68,15 +68,22 @@ class CoachAssistant:
         self.output_frames.clear()
 
     def detect_objects(self) -> List:
+        detections = []
         print("Start object detection...")
         for i in range(0, len(self.raw_frames), self.batch_size):
             frames_batch = self.raw_frames[i:i+self.batch_size]
-            self.detections.extend(self.model.predict(frames_batch, conf=0.1))
-    
+            detections.extend(self.model.predict(frames_batch, conf=0.1))
+        return detections
+
     def track_objects(self) -> None:
         print("Start object tracking...")
+        detections = self.detect_objects()
 
-        for fid, detection in enumerate(self.detections):
+        cropp_per_id = {}
+
+        aver_bbox_width = []  # to unify marker size
+
+        for fid, detection in enumerate(detections):
             index2label: Dict[int, str] = detection.names
             label2index: Dict[str, int] = {v:k for k,v in index2label.items()}
 
@@ -94,21 +101,20 @@ class CoachAssistant:
             for tracked_obj in tracked_detections:  
                 x1, y1, x2, y2 = map(int, tracked_obj[0])  # bbox in form xyxy
                 if tracked_obj[3] in players_classes:
+                    aver_bbox_width.append(x2-x1)
                     track_id = tracked_obj[4]
-                    team_id = self.teams_lineup.get(track_id)
-                    if team_id is None:
+                    is_in = cropp_per_id.get(track_id)
+                    if is_in is None:
                         y2_ = y1 + (y2-y1)//2
                         # take top halg of the image
                         cropped = frame[y1:y2_, x1:x2, :]
-                        team_id = self.teams_color_analyzer.get_player_team_lbl(cropped)
-                        self.teams_lineup[track_id] = team_id
+                        cropp_per_id[track_id] = cropped
 
                     p = Pawn(
                         track_id=tracked_obj[4],
                         class_id=tracked_obj[3],
                         label=index2label[tracked_obj[3]],
                         bbox=tracked_obj[0],
-                        team_id=team_id,
                     )
                     playesr_on_frame.append(p)
                     
@@ -120,8 +126,9 @@ class CoachAssistant:
                 if cls_id == label2index["ball"]:
                     bbox = frame_detection[0]
                     self.ball_dict[fid] = bbox
-
+        self.aver_bbox_width = np.mean(aver_bbox_width)
         self.interpolate_ball_trajectory()
+        self.teams_color_analyzer.fit_colors(cropp_per_id.values())
 
     def draw_annotations(self) -> None:
         print("Draw annotations...")
@@ -216,24 +223,19 @@ class CoachAssistant:
         frame = cv2.drawContours(frame, [vertices], 0, (0, 0, 0), 1)
         return frame
 
-    def adjust_teams_colors(self):
-        # TODO: its to slow: do it after tracking and skip by already saved id
-        print("Adjust teams' kit color")
-        aver_bbox_width = []
-        cropped_players_boxes = []
-        for fid, detection in enumerate(self.detections):
+    def assign_players_to_teams(self):
+        for fid, players in self.players_dict.items():
             frame = self.raw_frames[fid]
-            for detected_obj in detection:  
-                x1, y1, x2, y2 = map(int, detected_obj.boxes.xyxy[0])
-                aver_bbox_width.append(x2-x1)
-                y2_ = y1 + (y2-y1)//2
-                # take top halg of the image
-                cropped = frame[y1:y2_, x1:x2, :]
-                cropped_players_boxes.append(cropped) 
-
-        self.aver_bbox_width = np.mean(aver_bbox_width)
-        self.teams_color_analyzer.fit_colors(cropped_players_boxes)
-
+            for p in players:
+                team_id = self.teams_lineup.get(p.track_id)
+                if team_id is None:
+                    x1, y1, x2, y2 = map(int, p.bbox)
+                    y2_ = y1 + (y2-y1)//2
+                    cropped = frame[y1:y2_, x1:x2, :]
+                    team_id = self.teams_color_analyzer.get_player_team_lbl(cropped)
+                p.team_id = team_id
+                self.teams_lineup[p.track_id] = team_id
+                
 
 if __name__ == "__main__":
 
@@ -250,12 +252,9 @@ if __name__ == "__main__":
     ])
 
     
-
-
     ca = CoachAssistant(model_path=model_path, kits_colors=team_kits_colors)
     ca.read_video(dataset / clip_name)
-    ca.detect_objects()
-    ca.adjust_teams_colors()
     ca.track_objects()
+    ca.assign_players_to_teams()
     ca.draw_annotations()
     ca.save_video('./tmp/output.avi')
