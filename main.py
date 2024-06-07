@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Union
 from ultralytics import YOLO
 
-from utils.misc import Pawn
+from utils.misc import Player
 from utils.team_colors import KitColorAnalyzer
 
 
@@ -18,9 +18,9 @@ class CoachAssistant:
         self.tracker = sv.ByteTrack()
         self.teams_color_analyzer = KitColorAnalyzer(kit_colors=kits_colors)
 
-        self.teams_lineup = {}
+        self.teams_lineup: Dict[int, int] = {}
 
-        self.players_dict: Dict[int, List[Pawn]] = {}
+        self.players_dict: Dict[int, List[Player]] = {}
         self.ball_dict = {}
         self.aver_bbox_width = None
 
@@ -34,7 +34,6 @@ class CoachAssistant:
         self.W = None
         self.H = None
         self.batch_size = 64
-
 
     def read_video(self, input_path: Union[str, Path]) -> None:
         input_path = str(input_path)
@@ -93,7 +92,7 @@ class CoachAssistant:
             # track objects
             tracked_detections = self.tracker.update_with_detections(detection_sv)
             
-            playesr_on_frame = []
+            players_on_frame: List[Player] = []
             frame = self.raw_frames[fid]
 
             for tracked_obj in tracked_detections:  
@@ -108,16 +107,27 @@ class CoachAssistant:
                         team_id = self.teams_color_analyzer.get_player_cluster_id(cropped_player=cropped)
                         self.teams_lineup[track_id] = team_id
 
-                    p = Pawn(
+                    p = Player(
                         track_id=track_id,
                         class_id=tracked_obj[3],
                         label=index2label[tracked_obj[3]],
                         bbox=tracked_obj[0],
                         team_id=team_id
                     )
-                    playesr_on_frame.append(p)
+                    players_on_frame.append(p)
+            # check if any detected box overlaps and adjust detections (team asignment)
+            for idx, player in enumerate(players_on_frame[:-1]):
+                for other in players_on_frame[idx+1:]:
+                    if player.overlaps(other, 1.):
+                        # recalculate for both:
+                        for p in (player, other):
+                            x1, y1, x2, y2 = map(int, p.bbox)
+                            y2_ = y1 + (y2-y1)//2
+                            cropped = frame[y1:y2_, x1:x2, :]
+                            new_team_id = self.teams_color_analyzer.get_player_cluster_id(cropped_player=cropped)
+                            p.team_id = new_team_id
                     
-            self.players_dict[fid] = playesr_on_frame
+            self.players_dict[fid] = players_on_frame
 
             for frame_detection in detection_sv:
                 cls_id = frame_detection[3]
@@ -232,7 +242,7 @@ if __name__ == "__main__":
     team_kits_colors = np.array([
         [230, 230, 230],  # team 1
         [ 85,  85,  85],  # goalkeeper 1
-        [150, 235, 125],  # team 2
+        [170, 235, 175],  # team 2
         [220, 170, 130],  # goalkeeper 2
     ])
 
